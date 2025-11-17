@@ -95,7 +95,7 @@
     <script>
         const div = document.getElementById("msgs");
 
-        const ws = new WebSocket("ws://localhost:8000/canal");
+        const ws = new WebSocket(`${window.location.origin.replace("http", "ws")}/canal`);
 
         ws.onmessage = (event) => {
             const p = document.createElement("p");
