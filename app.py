@@ -1,13 +1,14 @@
-from fastapi import FastAPI, WebSocket
+from fastapi import FastAPI, WebSocket, Request
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-
 from database import get_engine, get_db_session
 from entities import ChatMessage
-
 from sqlmodel import select
 from typing import List
+from dotenv import load_dotenv
+load_dotenv()
+
 
 app = FastAPI(title="MiniChat v2")
 
@@ -17,18 +18,18 @@ templates = Jinja2Templates(directory="views")
 
 engine = get_engine()
 
-# Conexiones WebSocket activas
+# Lista de clientes WebSocket conectados
 clientes: List[WebSocket] = []
 
 
 @app.on_event("startup")
-def iniciar():
-    # Crear tablas si no existen
+def startup():
+    """Crear tablas al iniciar la app."""
     ChatMessage.metadata.create_all(engine)
 
 
 @app.get("/", response_class=HTMLResponse)
-def mostrar_chat(request):
+def home(request: Request):
     return templates.TemplateResponse("chat.html", {"request": request})
 
 
@@ -37,7 +38,7 @@ async def canal_chat(ws: WebSocket):
     await ws.accept()
     clientes.append(ws)
 
-    # Enviar historial
+    # --- Enviar historial persistente al nuevo cliente ---
     with get_db_session() as db:
         historial = db.exec(select(ChatMessage)).all()
         for msg in historial:
@@ -47,18 +48,23 @@ async def canal_chat(ws: WebSocket):
         while True:
             mensaje = await ws.receive_text()
 
+            # Guardar mensaje en la base de datos
             if ":" in mensaje:
                 nick, cuerpo = mensaje.split(":", 1)
 
                 with get_db_session() as db:
-                    nuevo = ChatMessage(nick=nick.strip(), cuerpo=cuerpo.strip())
+                    nuevo = ChatMessage(
+                        nick=nick.strip(),
+                        cuerpo=cuerpo.strip()
+                    )
                     db.add(nuevo)
                     db.commit()
 
-            # reenviar a todos
-            for c in clientes:
-                await c.send_text(mensaje)
+            # Reenviar el mensaje a TODOS los clientes conectados
+            for cliente in clientes:
+                await cliente.send_text(mensaje)
 
-    except:
+    except Exception:
+        # Quitar cliente desconectado
         if ws in clientes:
             clientes.remove(ws)
